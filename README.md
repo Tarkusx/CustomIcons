@@ -1,9 +1,3 @@
-C'est parfait, j'ai formaté et corrigé le texte. J'ai aussi ajouté une version anglaise.
-
-Voici le code en Markdown que vous pouvez directement copier-coller dans votre fichier `README.md` sur GitHub :
-
----
-
 # Custom Icons Enhanced for Classic WoW 1.12
 (Compatible avec Turtle-WoW)
 
