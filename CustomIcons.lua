@@ -1,7 +1,7 @@
 -- ========================================
 -- Custom Icons Addon Enhanced pour Classic WoW 1.12
 -- Addon d'icônes flottantes personnalisables
--- FIXED: Dropdown pagination to handle 40+ icons
+-- FIXED: Dropdown pagination, profile dropdown, and lock state persistence
 -- ========================================
 
 -- Table principale de l'addon
@@ -15,7 +15,13 @@ CustomIcons.iconsParPage = 15 -- Nombre d'icônes par page (max safe = 15)
 local parametresDefaut = {
     icones = {},
     verrouillee = false,
-    profilActuel = "Défaut"
+    profilActuel = "Défaut",
+    profils = {
+        ["Défaut"] = {
+            icones = {},
+            verrouillee = false
+        }
+    }
 }
 
 -- Liste des icônes disponibles - AJOUTER DE NOUVELLES ICÔNES ICI
@@ -148,6 +154,28 @@ function CustomIcons:InitialiserDropdownPagine()
     end
 end
 
+-- NOUVEAU: Initialiser le dropdown des profils
+function CustomIcons:InitialiserDropdownProfils()
+    return function()
+        if not CustomIconsDB.profils then
+            return
+        end
+        
+        for nomProfil, _ in pairs(CustomIconsDB.profils) do
+            local info = {}
+            info.text = nomProfil
+            info.value = nomProfil
+            info.func = function()
+                UIDropDownMenu_SetSelectedValue(CustomIcons.menuDeroulantProfils, this.value)
+                UIDropDownMenu_SetText(this.value, CustomIcons.menuDeroulantProfils)
+                CustomIcons.champNomProfil:SetText(this.value)
+            end
+            info.checked = (nomProfil == CustomIconsDB.profilActuel)
+            UIDropDownMenu_AddButton(info)
+        end
+    end
+end
+
 -- ========================================
 -- INITIALISATION DE L'ADDON
 -- ========================================
@@ -180,11 +208,29 @@ function CustomIcons:SurEvenement()
             end
         end
         
+        -- S'assurer que le profil par défaut existe
+        if not CustomIconsDB.profils then
+            CustomIconsDB.profils = {}
+        end
+        if not CustomIconsDB.profils["Défaut"] then
+            CustomIconsDB.profils["Défaut"] = {
+                icones = {},
+                verrouillee = false
+            }
+        end
+        
+        -- Charger l'état de verrouillage AVANT de restaurer les icônes
+        self.verrouillee = CustomIconsDB.verrouillee or false
+        
         -- Restaurer les icônes sauvegardées
         self:RestaurerIcones()
         
     elseif event == "VARIABLES_LOADED" then
         -- Initialisation supplémentaire si nécessaire
+        -- Mettre à jour l'interface si elle existe déjà
+        if self.boutonVerrou then
+            self:MettreAJourBoutonVerrou(self.boutonVerrou)
+        end
     end
 end
 
@@ -199,7 +245,7 @@ function CustomIcons:CreerFenetrePrincipale()
     -- Fenêtre principale - MODIFIER LA TAILLE/POSITION DE LA FENÊTRE ICI
     local fenetre = CreateFrame("Frame", "CustomIconsMainFrame", UIParent)
     fenetre:SetWidth(380)
-    fenetre:SetHeight(420)
+    fenetre:SetHeight(450) -- Augmenté pour le dropdown des profils
     fenetre:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
     fenetre:SetFrameStrata("DIALOG")
     fenetre:SetMovable(true)
@@ -345,9 +391,24 @@ function CustomIcons:CreerFenetrePrincipale()
     titreProfil:SetText("Profils:")
     titreProfil:SetTextColor(1, 1, 0, 1) -- Jaune
     
+    -- NOUVEAU: Menu déroulant des profils
+    local menuDeroulantProfils = CreateFrame("Frame", "CustomIconsProfileDropdown", fenetre, "UIDropDownMenuTemplate")
+    menuDeroulantProfils:SetPoint("TOPLEFT", titreProfil, "BOTTOMLEFT", -15, -5)
+    UIDropDownMenu_SetWidth(150, menuDeroulantProfils)
+    UIDropDownMenu_SetText(CustomIconsDB.profilActuel or "Défaut", menuDeroulantProfils)
+    UIDropDownMenu_Initialize(menuDeroulantProfils, self:InitialiserDropdownProfils())
+    
+    -- Zone de texte pour nom du profil (déplacée à droite du dropdown)
+    local champNomProfil = CreateFrame("EditBox", nil, fenetre, "InputBoxTemplate")
+    champNomProfil:SetPoint("LEFT", menuDeroulantProfils, "RIGHT", -20, 0)
+    champNomProfil:SetWidth(100)
+    champNomProfil:SetHeight(20)
+    champNomProfil:SetText(CustomIconsDB.profilActuel or "Défaut")
+    champNomProfil:SetAutoFocus(false)
+    
     -- Bouton sauvegarder profil
     local boutonSauver = CreateFrame("Button", nil, fenetre, "GameMenuButtonTemplate")
-    boutonSauver:SetPoint("TOPLEFT", titreProfil, "BOTTOMLEFT", 0, -5)
+    boutonSauver:SetPoint("TOPLEFT", menuDeroulantProfils, "BOTTOMLEFT", 15, -5)
     boutonSauver:SetWidth(80)
     boutonSauver:SetHeight(20)
     boutonSauver:SetText("Sauver")
@@ -365,14 +426,6 @@ function CustomIcons:CreerFenetrePrincipale()
         CustomIcons:ChargerProfil()
     end)
     
-    -- Zone de texte pour nom du profil
-    local champNomProfil = CreateFrame("EditBox", nil, fenetre, "InputBoxTemplate")
-    champNomProfil:SetPoint("LEFT", boutonCharger, "RIGHT", 10, 0)
-    champNomProfil:SetWidth(100)
-    champNomProfil:SetHeight(20)
-    champNomProfil:SetText("Défaut")
-    champNomProfil:SetAutoFocus(false)
-    
     -- Liste des icônes - MODIFIER LA TAILLE/POSITION DE LA LISTE ICI
     local cadreDefilement = CreateFrame("ScrollFrame", "CustomIconsScrollFrame", fenetre, "UIPanelScrollFrameTemplate")
     cadreDefilement:SetPoint("TOPLEFT", boutonSauver, "BOTTOMLEFT", 0, -10)
@@ -386,6 +439,7 @@ function CustomIcons:CreerFenetrePrincipale()
     -- Stocker les références
     self.fenetrePrincipale = fenetre
     self.menuDeroulant = menuDeroulant
+    self.menuDeroulantProfils = menuDeroulantProfils
     self.apercu = textureApercu
     self.curseurEchelle = curseurEchelle
     self.curseurAlpha = curseurAlpha
@@ -414,7 +468,7 @@ function CustomIcons:MettreAJourApercu(nomIcone)
     end
 end
 
--- Basculer le verrouillage des icônes - NOUVEAU
+-- Basculer le verrouillage des icônes - AMÉLIORÉ
 function CustomIcons:BasculerVerrouillage()
     self.verrouillee = not self.verrouillee
     CustomIconsDB.verrouillee = self.verrouillee
@@ -427,11 +481,27 @@ function CustomIcons:BasculerVerrouillage()
         else
             donneesIcone.cadre:SetMovable(true)
             donneesIcone.cadre:EnableMouse(true)
+            -- Réactiver les scripts de souris
+            donneesIcone.cadre:SetScript("OnMouseDown", function()
+                if arg1 == "LeftButton" then
+                    donneesIcone.cadre:StartMoving()
+                elseif arg1 == "RightButton" then
+                    CustomIcons:SupprimerIconeFlottante(donneesIcone.cadre)
+                end
+            end)
+            
+            donneesIcone.cadre:SetScript("OnMouseUp", function()
+                donneesIcone.cadre:StopMovingOrSizing()
+                CustomIcons:SauvegarderPositionIcone(donneesIcone.cadre)
+            end)
         end
     end
     
     local statut = self.verrouillee and "verrouillées" or "déverrouillées"
     DEFAULT_CHAT_FRAME:AddMessage("Icônes " .. statut .. "!")
+    
+    -- Mettre à jour l'affichage de la liste
+    self:MettreAJourListeIcones()
 end
 
 -- Mettre à jour le bouton de verrouillage
@@ -585,7 +655,7 @@ function CustomIcons:SauvegarderPositionIcone(cadre)
 end
 
 -- ========================================
--- GESTION DES PROFILS - NOUVEAU
+-- GESTION DES PROFILS - AMÉLIORÉ
 -- ========================================
 
 -- Sauvegarder un profil
@@ -617,6 +687,13 @@ function CustomIcons:SauvegarderProfil()
     end
     
     CustomIconsDB.profilActuel = nomProfil
+    
+    -- Mettre à jour le dropdown des profils
+    if self.menuDeroulantProfils then
+        UIDropDownMenu_Initialize(self.menuDeroulantProfils, self:InitialiserDropdownProfils())
+        UIDropDownMenu_SetText(nomProfil, self.menuDeroulantProfils)
+    end
+    
     DEFAULT_CHAT_FRAME:AddMessage("Profil '" .. nomProfil .. "' sauvegardé!")
 end
 
@@ -637,7 +714,20 @@ function CustomIcons:ChargerProfil()
     
     -- Charger les données du profil
     local profil = CustomIconsDB.profils[nomProfil]
-    CustomIconsDB.icones = profil.icones
+    CustomIconsDB.icones = {}
+    
+    -- Copier les icônes du profil
+    for _, iconeData in ipairs(profil.icones) do
+        table.insert(CustomIconsDB.icones, {
+            icone = iconeData.icone,
+            echelle = iconeData.echelle,
+            alpha = iconeData.alpha,
+            bordure = iconeData.bordure,
+            x = iconeData.x,
+            y = iconeData.y
+        })
+    end
+    
     CustomIconsDB.verrouillee = profil.verrouillee
     CustomIconsDB.profilActuel = nomProfil
     
@@ -650,15 +740,23 @@ function CustomIcons:ChargerProfil()
         self:MettreAJourBoutonVerrou(self.boutonVerrou)
     end
     
+    -- Mettre à jour le dropdown des profils
+    if self.menuDeroulantProfils then
+        UIDropDownMenu_SetText(nomProfil, self.menuDeroulantProfils)
+    end
+    
     DEFAULT_CHAT_FRAME:AddMessage("Profil '" .. nomProfil .. "' chargé!")
 end
 
 -- ========================================
--- RESTAURATION DES ICÔNES SAUVEGARDÉES
+-- RESTAURATION DES ICÔNES SAUVEGARDÉES - AMÉLIORÉ
 -- ========================================
 
 -- Restaurer les icônes sauvegardées
 function CustomIcons:RestaurerIcones()
+    -- Vider les icônes actuelles d'abord
+    self.iconesFlottantes = {}
+    
     -- Restaurer les icônes flottantes
     if CustomIconsDB.icones then
         for _, donneesIcone in ipairs(CustomIconsDB.icones) do
@@ -666,8 +764,8 @@ function CustomIcons:RestaurerIcones()
             icone:SetWidth(32 * donneesIcone.echelle)
             icone:SetHeight(32 * donneesIcone.echelle)
             icone:SetFrameStrata("TOOLTIP")
-            icone:SetMovable(true)
-            icone:EnableMouse(true)
+            icone:SetMovable(not self.verrouillee) -- Utiliser l'état de verrouillage actuel
+            icone:EnableMouse(not self.verrouillee)
             
             if donneesIcone.x and donneesIcone.y then
                 icone:SetPoint("CENTER", UIParent, "BOTTOMLEFT", donneesIcone.x, donneesIcone.y)
@@ -690,7 +788,7 @@ function CustomIcons:RestaurerIcones()
             texture:SetTexture("Interface\\AddOns\\CustomIcons\\icons\\" .. donneesIcone.icone)
             texture:SetAlpha(donneesIcone.alpha)
             
-            -- Scripts de souris (si pas verrouillé)
+            -- Scripts de souris (seulement si pas verrouillé)
             if not self.verrouillee then
                 icone:SetScript("OnMouseDown", function()
                     if arg1 == "LeftButton" then
@@ -704,9 +802,6 @@ function CustomIcons:RestaurerIcones()
                     icone:StopMovingOrSizing()
                     CustomIcons:SauvegarderPositionIcone(icone)
                 end)
-            else
-                icone:SetMovable(false)
-                icone:EnableMouse(false)
             end
             
             table.insert(self.iconesFlottantes, {
@@ -719,11 +814,6 @@ function CustomIcons:RestaurerIcones()
                 y = donneesIcone.y
             })
         end
-    end
-    
-    -- Restaurer l'état de verrouillage
-    if CustomIconsDB.verrouillee then
-        self.verrouillee = CustomIconsDB.verrouillee
     end
 end
 
@@ -776,6 +866,19 @@ function CustomIcons:MettreAJourListeIcones()
         
         decalageY = decalageY + 22
     end
+    
+    -- Afficher le profil actuel
+    local elementProfil = CreateFrame("Frame", nil, self.cadreListe)
+    elementProfil:SetWidth(self.cadreListe:GetWidth() - 20)
+    elementProfil:SetHeight(18)
+    elementProfil:SetPoint("TOPLEFT", self.cadreListe, "TOPLEFT", 10, -decalageY)
+    
+    local texteProfil = elementProfil:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    texteProfil:SetPoint("LEFT", elementProfil, "LEFT", 0, 0)
+    texteProfil:SetText("Profil actuel: " .. (CustomIconsDB.profilActuel or "Défaut"))
+    texteProfil:SetTextColor(1, 1, 0, 1) -- Jaune
+    
+    decalageY = decalageY + 22
     
     self.cadreListe:SetHeight(math.max(decalageY, 1))
 end
